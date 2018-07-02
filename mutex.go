@@ -1,4 +1,4 @@
-package etcdlock
+package etcdlocker
 
 import (
 	"context"

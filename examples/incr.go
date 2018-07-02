@@ -1,8 +1,8 @@
 package main
 
 import (
-	"etcd_locker"
 	"fmt"
+	"github.com/ccsnake/etcd_locker"
 
 	"github.com/juju/errors"
 )
@@ -28,7 +28,7 @@ func main() {
 }
 
 func Add(val *int, inc, times int, etcdAdders []string) error {
-	m, err := etcdlock.New("TEST:LOCK:1", etcdAdders)
+	m, err := etcdlocker.New("TEST:LOCK:1", etcdAdders)
 	if err != nil {
 		return err
 	}
