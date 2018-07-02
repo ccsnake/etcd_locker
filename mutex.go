@@ -149,7 +149,7 @@ func New(key string, endpoints []string, opts ...Option) (*Mutex, error) {
 		ttl:    options.TTL,
 		key:    key,
 		id:     hn + "-" + time.Now().String(),
-		logger: &StdLogger{},
+		logger: &nopLogger{},
 	}
 
 	return m, nil
