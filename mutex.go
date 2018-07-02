@@ -20,7 +20,7 @@ type Mutex struct {
 	ttl    time.Duration
 	key    string
 	id     string
-	loger  Logger
+	logger Logger
 	wg     sync.WaitGroup
 	locker sync.RWMutex
 	ttlCh  chan struct{}
@@ -35,12 +35,16 @@ func (m *Mutex) Lock() (err error) {
 	}
 
 	opt := &client.SetOptions{
-		PrevExist: "PrevNoExist",
+		PrevExist: client.PrevNoExist,
 		TTL:       m.ttl + time.Second*5,
 	}
 
 	defer func() {
 		if err == nil {
+			m.locker.Lock()
+			m.ttlCh = make(chan struct{})
+			m.locker.Unlock()
+			m.wg.Add(1)
 			go m.keepAlive()
 		}
 	}()
@@ -51,7 +55,7 @@ func (m *Mutex) Lock() (err error) {
 			return nil
 		}
 
-		etcdError, is := err.(*client.Error)
+		etcdError, is := err.(client.Error)
 		if !is {
 			return err
 		}
@@ -60,7 +64,7 @@ func (m *Mutex) Lock() (err error) {
 			return err
 		}
 
-		// todo max wait duration
+		m.logger.Printf("wait the locker release %s", m.key)
 		w := m.api.Watcher(m.key, nil)
 		for {
 			resp, err = w.Next(context.TODO())
@@ -80,19 +84,18 @@ func (m *Mutex) Lock() (err error) {
 func (m *Mutex) Unlock() error {
 	m.locker.Lock()
 	close(m.ttlCh)
+	m.wg.Wait()
 	m.ttlCh = nil
 	m.locker.Unlock()
 
-	m.wg.Wait()
 	for {
 		_, err := m.api.Delete(context.TODO(), m.key, nil)
 		if err == nil {
 			return nil
 		}
 
-		m.loger.Printf("delete locker %s failed %s", m.key, err)
-
-		etcdError, is := err.(*client.Error)
+		m.logger.Printf("delete locker %s failed %s", m.key, err)
+		etcdError, is := err.(client.Error)
 		if !is {
 			continue
 		}
@@ -104,23 +107,20 @@ func (m *Mutex) Unlock() error {
 }
 
 func (m *Mutex) keepAlive() {
-	m.locker.Lock()
-	m.ttlCh = make(chan struct{})
-	m.locker.Unlock()
-	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		defer m.loger.Printf("stop %s ttl goroutine", m.key)
+		defer m.logger.Printf("stop %s ttl goroutine", m.key)
+		m.logger.Printf("start %s ttl goroutine", m.key)
 
 		for {
 			select {
 			case <-m.ttlCh:
 				return
 			case <-time.After(m.ttl):
-				if _, err := m.api.Set(context.TODO(), m.key, m.id, &client.SetOptions{PrevValue: m.id, PrevExist: "PrevExist", TTL: m.ttl + time.Second*5}); err == nil {
-					m.loger.Printf("update %s id %s ttl ok", m.key, m.id)
+				if _, err := m.api.Set(context.TODO(), m.key, m.id, &client.SetOptions{PrevValue: m.id, PrevExist: client.PrevExist, TTL: m.ttl + time.Second*5}); err == nil {
+					m.logger.Printf("update %s id %s ttl ok", m.key, m.id)
 				} else {
-					m.loger.Printf("update %s id %s ttl faild %s", m.key, m.id, err.Error())
+					m.logger.Printf("update %s id %s ttl failed %s", m.key, m.id, err.Error())
 					return
 				}
 			}
@@ -149,7 +149,7 @@ func New(key string, endpoints []string, opts ...Option) (*Mutex, error) {
 		ttl:    options.TTL,
 		key:    key,
 		id:     hn + "-" + time.Now().String(),
-		loger:  &nopLogger{},
+		logger: &StdLogger{},
 	}
 
 	return m, nil
